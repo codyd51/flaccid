@@ -81,16 +81,17 @@ class FlacParser(object):
         header = MetadataBlockHeader.from_buffer(header_bytes)
         return header
 
+    def read_ctype_from_file(self, ctype_type):
+        raw_bytes = bytearray(bytes(self.flac.read(sizeof(ctype_type))))
+        return ctype_type.from_buffer(raw_bytes)
+
     def parse_data_for_metadata_header(self, header):
         # type: (MetadataBlockHeader) -> MetadataBlockData
         if header.block_type == MetadataBlockType.STREAMINFO.value:
             data_type = MetadataBlockStreamInfo
         else:
             raise NotImplementedError('block type {}'.format(header.block_type))
-        data_size = sizeof(data_type)
-        data_bytes = bytearray(bytes(self.flac.read(data_size)))
-        data = data_type.from_buffer(data_bytes)
-        return data
+        return self.read_ctype_from_file(data_type)
 
     def parse_metadata_block(self):
         header = self.parse_metadata_header()
@@ -108,6 +109,5 @@ class FlacParser(object):
 file = 'Bombtrack.flac'
 with open(file, 'rb') as flac_file:
     parser = FlacParser(flac_file)
-    print('got parser {}'.format(parser))
 
 
