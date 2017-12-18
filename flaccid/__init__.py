@@ -70,17 +70,39 @@ class FlacParser(object):
         self.flac = flac_file
         self.parse_magic()
 
-        self.stream_info = None
-
         # FLAC guarantees at least one metadata block; the stream info block
         self.metadata_blocks = []
         while True:
-            metadata_block = self.parse_metadata_block()
-            self.metadata_blocks.append(metadata_block)
+            try:
+                metadata_block = self.parse_metadata_block()
+                self.metadata_blocks.append(metadata_block)
+            except NotImplementedError:
+                print('Parsed up to unknown metadata block type, stopping here')
+                break
 
             if metadata_block.header.is_last_block:
                 break
         print('Finished parsing {} metadata blocks'.format(len(self.metadata_blocks)))
+
+        self.stream_info = [x for x in self.metadata_blocks if x.header.block_type == MetadataBlockType.STREAMINFO.value][0]
+        self.seek_table = [x for x in self.metadata_blocks if x.header.block_type == MetadataBlockType.SEEKTABLE.value][0]
+        self.dump_stream_info()
+        print('FLAC has {} entries in seek table'.format(len(self.seek_table.data.seek_points)))
+
+    def dump_stream_info(self):
+        print('FLAC ({}) audio stream info:'.format(self.flac.name))
+
+        print('\tSmallest block size: {}'.format(self.stream_info.data.min_block_size))
+        print('\tLargest block size: {}'.format(self.stream_info.data.max_block_size))
+        print('\tSmallest frame size: {}'.format(self.stream_info.data.min_frame_size))
+        print('\tLargest frame size: {}'.format(self.stream_info.data.max_frame_size))
+        print('\tSample rate (in Hz): {}'.format(self.stream_info.data.sample_rate_hz))
+        print('\tChannel count: {}'.format(self.stream_info.data.num_channels))
+        print('\tBits per sample: {}'.format(self.stream_info.data.bits_per_sample))
+        print('\tTotal sample count: {}'.format(self.stream_info.data.total_sample_count))
+
+        md5_sig = str(self.stream_info.data.md5_low) + str(self.stream_info.data.md5_high)
+        print('\tMD5 signature of audio stream: {}'.format(md5_sig))
 
     def parse_magic(self):
         correct_magic = b'fLaC'
