@@ -50,6 +50,20 @@ class MetadataBlock(object):
         self.data = data
 
 
+class MetadataSeekPoint(MetadataBlockData):
+    _fields_ = [
+        ('first_sample_number', c_uint64, 64),
+        ('target_offset', c_uint64, 64),
+        ('target_num_samples', c_uint16, 16),
+    ]
+
+
+class MetadataBlockSeekTable(MetadataBlockData):
+    def __init__(self, seek_points):
+        # type: (List[MetadataSeekPoint]) -> None
+        self.seek_points = seek_points
+
+
 class FlacParser(object):
     def __init__(self, flac_file):
         # type: (file) -> None
@@ -85,10 +99,26 @@ class FlacParser(object):
         raw_bytes = bytearray(bytes(self.flac.read(sizeof(ctype_type))))
         return ctype_type.from_buffer(raw_bytes)
 
+    def parse_seektable(self, header):
+        # type: (MetadataBlockHeader) -> MetadataBlockSeekTable
+        if header.block_type != MetadataBlockType.SEEKTABLE.value:
+            raise RuntimeError('wrong header passed to parse_seektable()')
+        # each SeekPoint is 18 bytes as defined by the standard
+        if sizeof(MetadataSeekPoint) != 18:
+            raise RuntimeError('bad seekpoint def? not 18 bytes, {}'.format(sizeof(MetadataSeekPoint)))
+        seekpoint_count = int(header.length / 18)
+        seekpoints = []
+        for i in range(seekpoint_count):
+            seekpoint = self.read_ctype_from_file(MetadataSeekPoint)
+            seekpoints.append(seekpoint)
+        return MetadataBlockSeekTable(seekpoints)
+
     def parse_data_for_metadata_header(self, header):
         # type: (MetadataBlockHeader) -> MetadataBlockData
         if header.block_type == MetadataBlockType.STREAMINFO.value:
             data_type = MetadataBlockStreamInfo
+        elif header.block_type == MetadataBlockType.SEEKTABLE.value:
+            return self.parse_seektable(header)
         else:
             raise NotImplementedError('block type {}'.format(header.block_type))
         return self.read_ctype_from_file(data_type)
