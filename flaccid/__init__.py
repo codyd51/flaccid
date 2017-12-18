@@ -76,6 +76,11 @@ class MetadataBlockVorbisComment(MetadataBlockDataLittleEndian):
         self.user_comments = user_comments
 
 
+class MetadataBlockPadding(MetadataBlock):
+    def __init__(self, length):
+        self.length = length
+
+
 class FlacParser(object):
     def __init__(self, flac_file):
         # type: (file) -> None
@@ -184,6 +189,13 @@ class FlacParser(object):
             user_comment = self.flac.read(user_comment_len).decode('utf-8')
             user_comments.append(user_comment)
         return MetadataBlockVorbisComment(vendor_string, user_comments)
+
+    def parse_padding(self, header):
+        # type: (MetadataBlockHeader) -> MetadataBlockPadding
+        if header.block_type != MetadataBlockType.PADDING.value:
+            raise RuntimeError('wrong header passed to parse_padding()')
+        return MetadataBlockPadding(header.length)
+
     def parse_data_for_metadata_header(self, header):
         # type: (MetadataBlockHeader) -> MetadataBlockData
         if header.block_type == MetadataBlockType.STREAMINFO.value:
@@ -192,6 +204,8 @@ class FlacParser(object):
             return self.parse_seektable(header)
         elif header.block_type == MetadataBlockType.VORBIS_COMMENT.value:
             return self.parse_vorbis_comment(header)
+        elif header.block_type == MetadataBlockType.PADDING.value:
+            return self.parse_padding(header)
         else:
             raise NotImplementedError('block type {}'.format(header.block_type))
         return self.read_ctype_from_file(data_type)
