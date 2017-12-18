@@ -1,5 +1,5 @@
-from typing import List
-from ctypes import sizeof, Structure, BigEndianStructure, c_uint8, c_uint16, c_uint32, c_uint64
+from typing import List, Text, Optional
+from ctypes import sizeof, LittleEndianStructure, BigEndianStructure, c_uint8, c_uint16, c_uint32, c_uint64
 from enum import Enum
 
 
@@ -25,6 +25,11 @@ class MetadataBlockHeader(BigEndianStructure):
 
 
 class MetadataBlockData(BigEndianStructure):
+    _pack_ = 1
+
+
+# some blocks are big endian, like vorbis comment blocks
+class MetadataBlockDataLittleEndian(LittleEndianStructure):
     _pack_ = 1
 
 
@@ -64,6 +69,13 @@ class MetadataBlockSeekTable(MetadataBlockData):
         self.seek_points = seek_points
 
 
+class MetadataBlockVorbisComment(MetadataBlockDataLittleEndian):
+    def __init__(self, vendor_string, user_comments):
+        # type: (Text, List[Text]) -> None
+        self.vendor_string = vendor_string
+        self.user_comments = user_comments
+
+
 class FlacParser(object):
     def __init__(self, flac_file):
         # type: (file) -> None
@@ -84,10 +96,20 @@ class FlacParser(object):
                 break
         print('Finished parsing {} metadata blocks'.format(len(self.metadata_blocks)))
 
-        self.stream_info = [x for x in self.metadata_blocks if x.header.block_type == MetadataBlockType.STREAMINFO.value][0]
-        self.seek_table = [x for x in self.metadata_blocks if x.header.block_type == MetadataBlockType.SEEKTABLE.value][0]
+        self.stream_info = self.get_metadata_block_with_type(MetadataBlockType.STREAMINFO)
+        self.seek_table = self.get_metadata_block_with_type(MetadataBlockType.SEEKTABLE)
+        self.vorbis_comments = self.get_metadata_block_with_type(MetadataBlockType.VORBIS_COMMENT)
+
         self.dump_stream_info()
-        print('FLAC has {} entries in seek table'.format(len(self.seek_table.data.seek_points)))
+        self.dump_seek_table()
+        self.dump_vorbis_comments()
+
+    def get_metadata_block_with_type(self, block_type):
+        # type: (MetadataBlockType) -> Optional[MetadataBlock]
+        for x in self.metadata_blocks:
+            if x.header.block_type == block_type.value:
+                return x
+        return None
 
     def dump_stream_info(self):
         print('FLAC ({}) audio stream info:'.format(self.flac.name))
@@ -103,6 +125,20 @@ class FlacParser(object):
 
         md5_sig = str(self.stream_info.data.md5_low) + str(self.stream_info.data.md5_high)
         print('\tMD5 signature of audio stream: {}'.format(md5_sig))
+
+    def dump_seek_table(self):
+        print('Seek table ({} entries):'.format(len(self.seek_table.data.seek_points)))
+        for i, seek_point in enumerate(self.seek_table.data.seek_points):
+            print('\tseek point {}:'.format(i))
+            print('\t\tFirst sample number: {}'.format(seek_point.first_sample_number))
+            print('\t\tTarget sample offset: {}'.format(seek_point.target_offset))
+            print('\t\tTarget sample count: {}'.format(seek_point.target_num_samples))
+
+    def dump_vorbis_comments(self):
+        comments = self.vorbis_comments.data
+        print('{} Vorbis comments. Vendor: {}'.format(len(comments.user_comments), comments.vendor_string))
+        for comment in comments.user_comments:
+            print('\t{}'.format(comment))
 
     def parse_magic(self):
         correct_magic = b'fLaC'
@@ -135,12 +171,27 @@ class FlacParser(object):
             seekpoints.append(seekpoint)
         return MetadataBlockSeekTable(seekpoints)
 
+    def parse_vorbis_comment(self, header):
+        # type: (MetadataBlockHeader) -> MetadataBlockVorbisComment
+        if header.block_type != MetadataBlockType.VORBIS_COMMENT.value:
+            raise RuntimeError('wrong header passed to parse_vorbis_comment()')
+        vendor_length = self.read_ctype_from_file(c_uint32).value
+        vendor_string = self.flac.read(vendor_length).decode('utf-8')
+        user_comment_list_len = self.read_ctype_from_file(c_uint32).value
+        user_comments = []
+        for i in range(user_comment_list_len):
+            user_comment_len = self.read_ctype_from_file(c_uint32).value
+            user_comment = self.flac.read(user_comment_len).decode('utf-8')
+            user_comments.append(user_comment)
+        return MetadataBlockVorbisComment(vendor_string, user_comments)
     def parse_data_for_metadata_header(self, header):
         # type: (MetadataBlockHeader) -> MetadataBlockData
         if header.block_type == MetadataBlockType.STREAMINFO.value:
             data_type = MetadataBlockStreamInfo
         elif header.block_type == MetadataBlockType.SEEKTABLE.value:
             return self.parse_seektable(header)
+        elif header.block_type == MetadataBlockType.VORBIS_COMMENT.value:
+            return self.parse_vorbis_comment(header)
         else:
             raise NotImplementedError('block type {}'.format(header.block_type))
         return self.read_ctype_from_file(data_type)
