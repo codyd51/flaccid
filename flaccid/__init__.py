@@ -1,4 +1,5 @@
-from ctypes import sizeof, Structure, BigEndianStructure, c_uint, c_uint32, c_uint64
+from typing import List
+from ctypes import sizeof, Structure, BigEndianStructure, c_uint8, c_uint16, c_uint32, c_uint64
 from enum import Enum
 
 
@@ -28,14 +29,14 @@ class MetadataBlockData(BigEndianStructure):
 
 
 class MetadataBlockStreamInfo(MetadataBlockData):
-    _fields = [
-        ('min_block_size', c_uint32, 16),
-        ('max_block_size', c_uint32, 16),
+    _fields_ = [
+        ('min_block_size', c_uint16, 16),
+        ('max_block_size', c_uint16, 16),
         ('min_frame_size', c_uint32, 24),
         ('max_frame_size', c_uint32, 24),
         ('sample_rate_hz', c_uint32, 20),
-        ('num_channels', c_uint32, 3),
-        ('bits_per_sample', c_uint32, 5),
+        ('num_channels', c_uint8, 3),
+        ('bits_per_sample', c_uint8, 5),
         ('total_sample_count', c_uint64, 36),
         ('md5_low', c_uint64, 64),
         ('md5_high', c_uint64, 64),
