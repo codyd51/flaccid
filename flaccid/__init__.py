@@ -118,7 +118,7 @@ class FrameHeader(object):
         self.block_size = self.read_block_size()
         self.sample_rate = self.read_sample_rate()
         self.channels = self.read_channel_assignment()
-        self.sample_size = self.read_sample_size()
+        self.sample_bit_count = self.read_sample_size()
 
     def read_block_size(self):
         raw_block_size = self.raw_header.block_size
@@ -239,14 +239,7 @@ class FlacParser(object):
         self.dump_vorbis_comments()
 
         frame_header = self.parse_frame_header()
-        print('frame header blocking strategy {} block size {}'.format(frame_header.blocking_strategy.name, frame_header.block_size))
-        print('got frame header! blocking strategy {} block size {} sample rate {} channels {} sample size {} '.format(
-            frame_header.blocking_strategy,
-            frame_header.block_size,
-            frame_header.sample_rate,
-            frame_header.channels,
-            frame_header.sample_size,
-        ))
+        self.dump_frame_header(frame_header)
 
     def parse_frame_header(self):
         # type: () -> FrameHeader
@@ -255,6 +248,15 @@ class FlacParser(object):
         if bin(raw_header.sync_code) != FrameHeaderRaw.SYNC_CODE:
             raise RuntimeError('FrameHeader sync code was incorrect (got {})'.format(bin(raw_header.sync_code)))
         return FrameHeader(raw_header)
+
+    def dump_frame_header(self, frame_header):
+        # type: (FrameHeader) -> None
+        print('Frame header:')
+        print('\tBlocking strategy: {}'.format(frame_header.blocking_strategy))
+        print('\tBlock size: {}'.format(frame_header.block_size))
+        print('\tSample rate: {}kHz'.format(frame_header.sample_rate / 1000))
+        print('\tChannel info: {}'.format(frame_header.channels))
+        print('\tBits per sample: {}'.format(frame_header.sample_bit_count))
 
     def get_metadata_block_with_type(self, block_type):
         # type: (MetadataBlockType) -> Optional[MetadataBlock]
