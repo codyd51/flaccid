@@ -81,6 +81,32 @@ class MetadataBlockPadding(MetadataBlock):
         self.length = length
 
 
+class FrameHeaderRaw(BigEndianStructure):
+    SYNC_CODE = '0b11111111111110'
+
+    _pack_ = 1
+    _fields_ = [
+        ('sync_code', c_uint16, 14),
+        ('reserved1', c_uint8, 1),
+        ('blocking_strategy', c_uint8, 1),
+        ('block_size', c_uint8, 4),
+        ('sample_rate', c_uint8, 4),
+        ('channel', c_uint8, 4),
+        ('sample_size', c_uint8, 3),
+        ('reserved2', c_uint8, 1),
+    ]
+class FrameHeader(object):
+    def __init__(self, raw_header):
+        # type: (FrameHeaderRaw) -> None
+        self.raw_header = raw_header
+        self.validate_header()
+    def validate_header(self):
+        if self.raw_header.reserved1 != 0:
+            raise RuntimeError('frame_header->reserved1 was not 0!')
+        if self.raw_header.reserved2 != 0:
+            raise RuntimeError('frame_header->reserved2 was not 0!')
+
+
 class FlacParser(object):
     def __init__(self, flac_file):
         # type: (file) -> None
@@ -108,6 +134,24 @@ class FlacParser(object):
         self.dump_stream_info()
         self.dump_seek_table()
         self.dump_vorbis_comments()
+
+        frame_header = self.parse_frame_header()
+        print('frame header blocking strategy {} block size {}'.format(frame_header.blocking_strategy.name, frame_header.block_size))
+        print('got frame header! blocking strategy {} block size {} sample rate {} channels {} sample size {} '.format(
+            frame_header.blocking_strategy,
+            frame_header.block_size,
+            frame_header.sample_rate,
+            frame_header.channels,
+            frame_header.sample_size,
+        ))
+
+    def parse_frame_header(self):
+        # type: () -> FrameHeader
+        raw_header_bytes = bytearray(bytes(self.flac.read(sizeof(FrameHeaderRaw))))
+        raw_header = FrameHeaderRaw.from_buffer(raw_header_bytes)
+        if bin(raw_header.sync_code) != FrameHeaderRaw.SYNC_CODE:
+            raise RuntimeError('FrameHeader sync code was incorrect (got {})'.format(bin(raw_header.sync_code)))
+        return FrameHeader(raw_header)
 
     def get_metadata_block_with_type(self, block_type):
         # type: (MetadataBlockType) -> Optional[MetadataBlock]
