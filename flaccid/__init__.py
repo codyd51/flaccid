@@ -95,11 +95,114 @@ class FrameHeaderRaw(BigEndianStructure):
         ('sample_size', c_uint8, 3),
         ('reserved2', c_uint8, 1),
     ]
+
+
+class BlockingStrategy(Enum):
+    FIXED_BLOCK_SIZE = 0
+    VARIABLE_BLOCK_SIZE = 1
+
+
+class ChannelAssignment(Enum):
+    MONO = 0b0000
+    LEFT_RIGHT = 0b0001
+    LEFT_RIGHT_CENTER = 0b0010
+
+
 class FrameHeader(object):
     def __init__(self, raw_header):
         # type: (FrameHeaderRaw) -> None
         self.raw_header = raw_header
         self.validate_header()
+
+        self.blocking_strategy = BlockingStrategy(self.raw_header.blocking_strategy)
+        self.block_size = self.read_block_size()
+        self.sample_rate = self.read_sample_rate()
+        self.channels = self.read_channel_assignment()
+        self.sample_size = self.read_sample_size()
+
+    def read_block_size(self):
+        raw_block_size = self.raw_header.block_size
+        if raw_block_size == int(0b0000):
+            raise RuntimeError('frame_header->block_size uses reserved value')
+        elif raw_block_size == int(0b0001):
+            return 192
+        elif int(0b0010) <= raw_block_size <= int(0b0101):
+            return 576 * pow(2, raw_block_size - 2)
+        elif raw_block_size == int(0b0110):
+            # get 8 bit (blocksize - 1) from end of header
+            raise NotImplementedError()
+        elif raw_block_size == int(0b0111):
+            # get 16 bit (blocksize - 1) from end of header
+            raise NotImplementedError()
+        else:
+            return 256 * pow(2, raw_block_size - 8)
+
+    def read_sample_rate(self):
+        sample_val = self.raw_header.sample_rate
+        value_map = {
+            0b0001: 88200, # 88.2kHz
+            0b0010: 176400, # 176.4kHz
+            0b0011: 192000, # 192kHz
+            0b0100: 8000, # 8kHz
+            0b0101: 16000, # 16kHz
+            0b0110: 22050, # 22.05kHz
+            0b0111: 24000, # 24kHz
+            0b1000: 32000, # 32kHz
+            0b1001: 44100, # 44.1kHz
+            0b1010: 48000, # 48kHz
+            0b1011: 96000, # 96kHz
+        }
+        if sample_val in [0b0000, 0b1100, 0b1101, 0b1110]:
+            # respectively:
+            # get from STREAMINFO metadata block
+            # get 8 bit sample rate (in kHz) from end of header
+            # get 16 bit sample rate (in kHz) from end of header
+            # get 16 bit sample rate (in tens of kHz) from end of header
+            raise NotImplementedError()
+        elif sample_val in value_map:
+            return value_map[sample_val]
+        raise RuntimeError('invalid sample rate')
+
+    def read_channel_assignment(self):
+        # 0000-0111 : (number of independent channels)-1
+        # 1 channel: mono
+        # 2 channels: left, right
+        # 3 channels: left, right, center
+        # 4 channels: front left, front right, back left, back right
+        # 5 channels: front left, front right, front center, back/surround left, back/surround right
+        # 6 channels: front left, front right, front center, LFE, back/surround left, back/surround right
+        # 7 channels: front left, front right, front center, LFE, back center, side left, side right
+        # 8 channels: front left, front right, front center, LFE, back left, back right, side left, side right
+        # 1000 : left/side stereo: channel 0 is the left channel, channel 1 is the side(difference) channel
+        # 1001 : right/side stereo: channel 0 is the side(difference) channel, channel 1 is the right channel
+        # 1010 : mid/side stereo: channel 0 is the mid(average) channel, channel 1 is the side(difference) channel
+        # 1011-1111 : reserved
+        channel_val = self.raw_header.channel
+        if channel_val < 0b1000:
+            try:
+                return ChannelAssignment(channel_val)
+            except Exception as e:
+                raise NotImplementedError()
+        elif 0b1011 <= channel_val <= 0b1111:
+            raise RuntimeError('reserved channel assignment')
+        raise NotImplementedError()
+
+    def read_sample_size(self):
+        sample_size = self.raw_header.sample_size
+        if sample_size  == 0b000:
+            # get from STREAMINFO metadata block
+            raise NotImplementedError()
+        elif sample_size in [0b011, 0b111]:
+            raise RuntimeError('reserved sample_size requested')
+        sample_size_map = {
+            0b001: 8,  # 8 bits per sample
+            0b010: 12, # 12 bits per sample
+            0b100: 16, # 16 bits per sample
+            0b101: 20, # 20 bits per sample
+            0b110: 24, # 24 bits per sample
+        }
+        return sample_size_map[sample_size]
+
     def validate_header(self):
         if self.raw_header.reserved1 != 0:
             raise RuntimeError('frame_header->reserved1 was not 0!')
