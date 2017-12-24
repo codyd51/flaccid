@@ -1,5 +1,6 @@
 from typing import List, Text, Optional
 from ctypes import sizeof, LittleEndianStructure, BigEndianStructure, c_uint8, c_uint16, c_uint32, c_uint64
+from crcmod.predefined import mkPredefinedCrcFun
 from enum import Enum
 
 
@@ -76,7 +77,7 @@ class MetadataBlockVorbisComment(MetadataBlockDataLittleEndian):
         self.user_comments = user_comments
 
 
-class MetadataBlockPadding(MetadataBlock):
+class MetadataBlockPadding(MetadataBlockData):
     def __init__(self, length):
         self.length = length
 
@@ -94,6 +95,8 @@ class FrameHeaderRaw(BigEndianStructure):
         ('channel', c_uint8, 4),
         ('sample_size', c_uint8, 3),
         ('reserved2', c_uint8, 1),
+        ('frame_number', c_uint8, 8),
+        ('crc', c_uint8, 8),
     ]
 
 
@@ -119,6 +122,33 @@ class FrameHeader(object):
         self.sample_rate = self.read_sample_rate()
         self.channels = self.read_channel_assignment()
         self.sample_bit_count = self.read_sample_size()
+        self.frame_number = self.raw_header.frame_number
+        self.crc = self.raw_header.crc
+        self.verify_crc()
+
+        # needs extra data at end of frame
+        if self.blocking_strategy == BlockingStrategy.VARIABLE_BLOCK_SIZE:
+            raise NotImplementedError()
+        if not self.raw_header.block_size & ~0b0110:
+            raise NotImplementedError()
+        if not self.raw_header.sample_rate & ~0b1100:
+            raise NotImplementedError()
+
+    def verify_crc(self):
+        frame_header_bytes = bytearray(self.raw_header)
+        # we want to check everything up to (but not including) the CRC, which is the last byte
+        bytes_to_verify = frame_header_bytes[:-1]
+        correct_crc = frame_header_bytes[-1]
+
+        crcModFunc = mkPredefinedCrcFun('crc-8')
+        actual_crc = crcModFunc(bytes_to_verify)
+
+        if correct_crc != actual_crc:
+            raise RuntimeError('Mismatched CRC! Expected {}, but computed value is {}'.format(
+                hex(correct_crc),
+                hex(actual_crc))
+            )
+        print('Frame header CRC validated')
 
     def read_block_size(self):
         raw_block_size = self.raw_header.block_size
@@ -243,13 +273,16 @@ class FlacParser(object):
 
     def parse_frame_header(self):
         # type: () -> FrameHeader
+        print('frame header at {}'.format(hex(self.flac.tell())))
         raw_header_bytes = bytearray(bytes(self.flac.read(sizeof(FrameHeaderRaw))))
         raw_header = FrameHeaderRaw.from_buffer(raw_header_bytes)
         if bin(raw_header.sync_code) != FrameHeaderRaw.SYNC_CODE:
             raise RuntimeError('FrameHeader sync code was incorrect (got {})'.format(bin(raw_header.sync_code)))
-        return FrameHeader(raw_header)
+        header = FrameHeader(raw_header)
+        return header
 
-    def dump_frame_header(self, frame_header):
+    @staticmethod
+    def dump_frame_header(frame_header):
         # type: (FrameHeader) -> None
         print('Frame header:')
         print('\tBlocking strategy: {}'.format(frame_header.blocking_strategy))
@@ -257,6 +290,8 @@ class FlacParser(object):
         print('\tSample rate: {}kHz'.format(frame_header.sample_rate / 1000))
         print('\tChannel info: {}'.format(frame_header.channels))
         print('\tBits per sample: {}'.format(frame_header.sample_bit_count))
+        print('\tFrame number: {}'.format(frame_header.frame_number))
+        print('\tCRC: {}'.format(hex(frame_header.crc)))
 
     def get_metadata_block_with_type(self, block_type):
         # type: (MetadataBlockType) -> Optional[MetadataBlock]
