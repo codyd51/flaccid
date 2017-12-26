@@ -1,5 +1,5 @@
 from typing import List, Text, Optional
-from ctypes import sizeof, LittleEndianStructure, BigEndianStructure, c_uint8, c_uint16, c_uint32, c_uint64
+from ctypes import sizeof, LittleEndianStructure, BigEndianStructure, c_uint8, c_uint16, c_uint32, c_uint64, c_uint
 from crcmod.predefined import mkPredefinedCrcFun
 from enum import Enum
 
@@ -196,6 +196,7 @@ class FrameHeader(object):
         self.frame_number = self.raw_header.frame_number
         self.crc = self.raw_header.crc
         self.verify_crc()
+        self.dump()
 
         # needs extra data at end of frame
         if self.blocking_strategy == BlockingStrategy.VARIABLE_BLOCK_SIZE:
@@ -309,6 +310,50 @@ class FrameHeader(object):
             raise RuntimeError('frame_header->reserved1 was not 0!')
         if self.raw_header.reserved2 != 0:
             raise RuntimeError('frame_header->reserved2 was not 0!')
+
+    def dump(self):
+        # type: () -> None
+        print('Frame header:')
+        print('\tBlocking strategy: {}'.format(self.blocking_strategy))
+        print('\tBlock size: {}'.format(self.block_size))
+        print('\tSample rate: {}kHz'.format(self.sample_rate / 1000))
+        print('\tChannel info: {}'.format(self.channels))
+        print('\tBits per sample: {}'.format(self.sample_bit_count))
+        print('\tFrame number: {}'.format(self.frame_number))
+        print('\tCRC: {}'.format(hex(self.crc)))
+
+
+class FlacSubframe(object):
+    def __init__(self, parser, frame):
+        self.parser = parser
+        self.frame = frame
+        self.frame_header = frame.header
+        self.flac_file = parser.flac
+        self.audio_data = []
+
+        self.header = SubframeHeader(self.flac_file)
+        self.parse_audio_frame()
+        print('FlacSubframe header {}'.format(self.header))
+
+    def parse_audio_frame(self):
+        if self.header.subframe_type == SubframeType.SUBFRAME_CONSTANT:
+            self.read_audio_sample()
+        else:
+            raise NotImplementedError()
+
+    def read_audio_sample(self):
+        bits_per_sample = self.frame_header.sample_bit_count
+        bytes_per_sample = round((bits_per_sample / 8) + 0.5)
+        print('bits in sample: {} bytes {}'.format(hex(bits_per_sample), hex(bytes_per_sample)))
+        constant_val = c_uint16.from_buffer(bytearray(self.flac_file.read(bytes_per_sample))).value
+        print('bin {}'.format(bin(constant_val)))
+        # trim to the actual sample bits
+        # add 2 to account for '0b' prefix
+        constant_val = str(bin(constant_val))[:bits_per_sample+2]
+        # back to int
+        constant_val = int(constant_val, 2)
+        print('frame value: {}'.format(hex(constant_val)))
+        self.audio_data.append(constant_val)
 
 
 class FlacParser(object):
