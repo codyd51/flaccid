@@ -343,16 +343,28 @@ class FlacSubframe(object):
         self.audio_data.append(constant_val)
 
 
+def read_big_endian_uint16(flac_file):
+    # type: (file) -> int
+    int_bytes =  flac_file.read(2)
+    int_bytes = bytes([c for t in zip(int_bytes[1::2], int_bytes[::2]) for c in t])
+    return c_uint16.from_buffer(bytearray(int_bytes)).value
+
+
 class FlacFrame(object):
     def __init__(self, flac_parser):
         # type: (FlacParser) -> None
         self.parser = flac_parser
         self.file = self.parser.flac
+        self.fileoff = self.file.tell()
+        self.footer_crc = None
 
         self.header = self.parse_frame_header()
+        self.subframes =  self.parse_subframes()
+        self.parse_footer_crc()
 
+    def parse_subframes(self):
         # TODO(PT): support channels better
-        self.channel_audio_data = []
+        subframes = []
         if self.header.channels != ChannelAssignment.LEFT_RIGHT:
             raise NotImplementedError()
         for channel in range(self.header.channels.channel_count()):
@@ -362,7 +374,7 @@ class FlacFrame(object):
             [hex(x) for x in subframes[0].audio_data],
             [hex(x) for x in subframes[1].audio_data]
         ))
-        self.parse_frame_footer()
+        return subframes
 
     def parse_subframe(self):
         subframe = FlacSubframe(self.parser, self)
