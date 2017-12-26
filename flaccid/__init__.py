@@ -188,7 +188,7 @@ class FrameHeader(object):
         self.frame_number = self.raw_header.frame_number
         self.crc = self.raw_header.crc
         self.verify_crc()
-        self.dump()
+        # self.dump()
 
         # needs extra data at end of frame
         if self.blocking_strategy == BlockingStrategy.VARIABLE_BLOCK_SIZE:
@@ -212,7 +212,6 @@ class FrameHeader(object):
                 hex(correct_crc),
                 hex(actual_crc))
             )
-        print('Frame header CRC validated')
 
     def read_block_size(self):
         raw_block_size = self.raw_header.block_size
@@ -325,7 +324,6 @@ class FlacSubframe(object):
 
         self.header = SubframeHeader(self.flac_file)
         self.parse_audio_frame()
-        print('FlacSubframe header {}'.format(self.header))
 
     def parse_audio_frame(self):
         if self.header.subframe_type == SubframeType.SUBFRAME_CONSTANT:
@@ -336,15 +334,12 @@ class FlacSubframe(object):
     def read_audio_sample(self):
         bits_per_sample = self.frame_header.sample_bit_count
         bytes_per_sample = round((bits_per_sample / 8) + 0.5)
-        print('bits in sample: {} bytes {}'.format(hex(bits_per_sample), hex(bytes_per_sample)))
         constant_val = c_uint16.from_buffer(bytearray(self.flac_file.read(bytes_per_sample))).value
-        print('bin {}'.format(bin(constant_val)))
         # trim to the actual sample bits
         # add 2 to account for '0b' prefix
         constant_val = str(bin(constant_val))[:bits_per_sample+2]
         # back to int
         constant_val = int(constant_val, 2)
-        print('frame value: {}'.format(hex(constant_val)))
         self.audio_data.append(constant_val)
 
 
@@ -361,11 +356,11 @@ class FlacFrame(object):
         if self.header.channels != ChannelAssignment.LEFT_RIGHT:
             raise NotImplementedError()
         for channel in range(self.header.channels.channel_count()):
-            print('reading sample channel {}'.format(channel))
-            self.channel_audio_data.append(self.parse_subframe())
-        print('({} {})'.format(
-            [hex(x) for x in self.channel_audio_data[0].audio_data],
-            [hex(x) for x in self.channel_audio_data[1].audio_data]
+            subframes.append(self.parse_subframe())
+        print('Audio samples: ')
+        print('\t({} {})'.format(
+            [hex(x) for x in subframes[0].audio_data],
+            [hex(x) for x in subframes[1].audio_data]
         ))
         self.parse_frame_footer()
 
@@ -375,7 +370,7 @@ class FlacFrame(object):
 
     def parse_frame_header(self):
         # type: () -> FrameHeader
-        print('frame header at {}'.format(hex(self.file.tell())))
+        print('{}: frame header'.format(hex(self.file.tell())))
         raw_header_bytes = bytearray(bytes(self.file.read(sizeof(FrameHeaderRaw))))
         raw_header = FrameHeaderRaw.from_buffer(raw_header_bytes)
         if bin(raw_header.sync_code) != FrameHeaderRaw.SYNC_CODE:
@@ -412,13 +407,14 @@ class FlacParser(object):
         self.seek_table = self.get_metadata_block_with_type(MetadataBlockType.SEEKTABLE)
         self.vorbis_comments = self.get_metadata_block_with_type(MetadataBlockType.VORBIS_COMMENT)
 
-        self.dump_stream_info()
-        #self.dump_seek_table()
-        self.dump_vorbis_comments()
+        # self.dump_stream_info()
+        # self.dump_seek_table()
+        # self.dump_vorbis_comments()
 
-        #self.parse_frame()
         frame = FlacFrame(self)
-        print('got frame {}'.format(frame))
+        frame = FlacFrame(self)
+        frame = FlacFrame(self)
+        frame = FlacFrame(self)
 
     def get_metadata_block_with_type(self, block_type):
         # type: (MetadataBlockType) -> Optional[MetadataBlock]
