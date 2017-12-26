@@ -110,6 +110,77 @@ class ChannelAssignment(Enum):
     LEFT_RIGHT = 0b0001
     LEFT_RIGHT_CENTER = 0b0010
 
+    def channel_count(self):
+        channel_counts = [1, 2, 3]
+        return channel_counts[self.value]
+
+
+class SubframeType(Enum):
+    SUBFRAME_CONSTANT = 0
+    SUBFRAME_VERBATIM = 1
+    SUBFRAME_LPC = 2
+
+
+def access_bit(data, num):
+    base = int(num/8)
+    shift = num % 8
+    return (data[base] & (1<<shift)) >> shift
+
+
+class SubframeHeader(object):
+    def __init__(self, flac_file):
+        self.flac_file = flac_file
+        self.fileoff = self.flac_file.tell()
+
+        self.predictor_order = 0
+        self.subframe_type = self.read_subframe_type()
+
+        self.dump()
+
+    def read_wasted_bits_per_sample(self):
+        byte = bytearray(self.flac_file.read(1))
+        flag = access_bit(byte, 0)
+        if flag == 0:
+            return 0
+        raise NotImplementedError()
+        if flag != 1:
+            raise RuntimeError('wasted bps flag was something other than 0/1: {}'.format(flag))
+        wasted_val = []
+        while True:
+            flag = c_uint8.from_buffer(bytearray(self.flac_file.read(1))).value
+            wasted_val.append(flag)
+            if flag == 1:
+                break
+        wasted_val = reversed(wasted_val)
+        wasted_val_str = '0b{}'.format(''.join(wasted_val))
+        wasted_val_int = int(wasted_val_str)
+        print('wasted_val {} str {} int {}'.format(wasted_val, wasted_val_str, wasted_val_int))
+        return wasted_val_int
+
+    def read_subframe_type(self):
+        type = c_uint8.from_buffer(bytearray(self.flac_file.read(1))).value
+        print('subframe type: {}'.format(hex(type)))
+        if type == 0x000000:
+            return SubframeType.SUBFRAME_CONSTANT
+        elif type == 0x000001:
+            return SubframeType.SUBFRAME_VERBATIM
+        elif 0x001000 <= type <= 0x001111:
+            masked = type & 0x000111
+            if masked > 4:
+                raise RuntimeError('Reserved subframe type {}'.format(hex(type)))
+            self.predictor_order = masked
+        elif 0x010000 <= type <= 0x011111:
+            raise RuntimeError('Reserved subframe type {}'.format(hex(type)))
+        elif 0x100000 <= type <= 0x111111:
+            masked = type & 0x011111
+            self.predictor_order = masked + 1
+            return SubframeType.SUBFRAME_LPC
+        raise RuntimeError('Unknown subframe type {}'.format(hex(type)))
+
+    def dump(self):
+        print('Subframe header:')
+        print('\tSubframe type: {}'.format(self.subframe_type.name))
+
 
 class FrameHeader(object):
     def __init__(self, raw_header):
