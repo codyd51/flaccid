@@ -378,9 +378,22 @@ class FlacFrame(object):
         header = FrameHeader(raw_header)
         return header
 
-    def parse_frame_footer(self):
-        # type: () -> None
-        print('reading frame footer at {}'.format(hex(self.file.tell())))
+    def parse_footer_crc(self):
+        # read byte data of start of frame to start of footer
+        frame_size = self.file.tell() - self.fileoff
+        self.file.seek(self.fileoff)
+        frame_data = self.file.read(frame_size)
+        # CRC-16
+        # TODO (PT): check every >1 byte read and make sure we swap to big endian
+        self.footer_crc = read_big_endian_uint16(self.file)
+
+        crcModFunc = mkPredefinedCrcFun('crc-16-buypass')
+        actual_crc = crcModFunc(frame_data)
+        if self.footer_crc != actual_crc:
+            raise RuntimeError('Frame footer CRC mismatch. Expected {}, got {}'.format(
+                hex(actual_crc),
+                hex(self.footer_crc)
+            ))
 
 
 class FlacParser(object):
