@@ -356,6 +356,46 @@ class FlacSubframe(object):
         self.audio_data.append(constant_val)
 
 
+class FlacFrame(object):
+    def __init__(self, flac_parser):
+        # type: (FlacParser) -> None
+        self.parser = flac_parser
+        self.file = self.parser.flac
+
+        self.header = self.parse_frame_header()
+
+        # TODO(PT): support channels better
+        self.channel_audio_data = []
+        if self.header.channels != ChannelAssignment.LEFT_RIGHT:
+            raise NotImplementedError()
+        for channel in range(self.header.channels.channel_count()):
+            print('reading sample channel {}'.format(channel))
+            self.channel_audio_data.append(self.parse_subframe())
+        print('({} {})'.format(
+            [hex(x) for x in self.channel_audio_data[0].audio_data],
+            [hex(x) for x in self.channel_audio_data[1].audio_data]
+        ))
+        self.parse_frame_footer()
+
+    def parse_subframe(self):
+        subframe = FlacSubframe(self.parser, self)
+        return subframe
+
+    def parse_frame_header(self):
+        # type: () -> FrameHeader
+        print('frame header at {}'.format(hex(self.file.tell())))
+        raw_header_bytes = bytearray(bytes(self.file.read(sizeof(FrameHeaderRaw))))
+        raw_header = FrameHeaderRaw.from_buffer(raw_header_bytes)
+        if bin(raw_header.sync_code) != FrameHeaderRaw.SYNC_CODE:
+            raise RuntimeError('FrameHeader sync code was incorrect (got {})'.format(bin(raw_header.sync_code)))
+        header = FrameHeader(raw_header)
+        return header
+
+    def parse_frame_footer(self):
+        # type: () -> None
+        print('reading frame footer at {}'.format(hex(self.file.tell())))
+
+
 class FlacParser(object):
     def __init__(self, flac_file):
         # type: (file) -> None
@@ -381,33 +421,12 @@ class FlacParser(object):
         self.vorbis_comments = self.get_metadata_block_with_type(MetadataBlockType.VORBIS_COMMENT)
 
         self.dump_stream_info()
-        self.dump_seek_table()
+        #self.dump_seek_table()
         self.dump_vorbis_comments()
 
-        frame_header = self.parse_frame_header()
-        self.dump_frame_header(frame_header)
-
-    def parse_frame_header(self):
-        # type: () -> FrameHeader
-        print('frame header at {}'.format(hex(self.flac.tell())))
-        raw_header_bytes = bytearray(bytes(self.flac.read(sizeof(FrameHeaderRaw))))
-        raw_header = FrameHeaderRaw.from_buffer(raw_header_bytes)
-        if bin(raw_header.sync_code) != FrameHeaderRaw.SYNC_CODE:
-            raise RuntimeError('FrameHeader sync code was incorrect (got {})'.format(bin(raw_header.sync_code)))
-        header = FrameHeader(raw_header)
-        return header
-
-    @staticmethod
-    def dump_frame_header(frame_header):
-        # type: (FrameHeader) -> None
-        print('Frame header:')
-        print('\tBlocking strategy: {}'.format(frame_header.blocking_strategy))
-        print('\tBlock size: {}'.format(frame_header.block_size))
-        print('\tSample rate: {}kHz'.format(frame_header.sample_rate / 1000))
-        print('\tChannel info: {}'.format(frame_header.channels))
-        print('\tBits per sample: {}'.format(frame_header.sample_bit_count))
-        print('\tFrame number: {}'.format(frame_header.frame_number))
-        print('\tCRC: {}'.format(hex(frame_header.crc)))
+        #self.parse_frame()
+        frame = FlacFrame(self)
+        print('got frame {}'.format(frame))
 
     def get_metadata_block_with_type(self, block_type):
         # type: (MetadataBlockType) -> Optional[MetadataBlock]
