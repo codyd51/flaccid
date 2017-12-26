@@ -118,7 +118,8 @@ class ChannelAssignment(Enum):
 class SubframeType(Enum):
     SUBFRAME_CONSTANT = 0
     SUBFRAME_VERBATIM = 1
-    SUBFRAME_LPC = 2
+    SUBFRAME_FIXED = 2
+    SUBFRAME_LPC = 3
 
 
 def access_bit(data, num):
@@ -135,31 +136,9 @@ class SubframeHeader(object):
         self.predictor_order = 0
         self.subframe_type = self.read_subframe_type()
 
-        self.dump()
+        # self.dump()
 
-    def read_wasted_bits_per_sample(self):
-        byte = bytearray(self.flac_file.read(1))
-        flag = access_bit(byte, 0)
-        if flag == 0:
-            return 0
-        raise NotImplementedError()
-        if flag != 1:
-            raise RuntimeError('wasted bps flag was something other than 0/1: {}'.format(flag))
-        wasted_val = []
-        while True:
-            flag = c_uint8.from_buffer(bytearray(self.flac_file.read(1))).value
-            wasted_val.append(flag)
-            if flag == 1:
-                break
-        wasted_val = reversed(wasted_val)
-        wasted_val_str = '0b{}'.format(''.join(wasted_val))
-        wasted_val_int = int(wasted_val_str)
-        print('wasted_val {} str {} int {}'.format(wasted_val, wasted_val_str, wasted_val_int))
-        return wasted_val_int
-
-    def read_subframe_type(self):
-        type = c_uint8.from_buffer(bytearray(self.flac_file.read(1))).value
-        print('subframe type: {}'.format(hex(type)))
+    def interpret_subframe_type(self, type):
         if type == 0x000000:
             return SubframeType.SUBFRAME_CONSTANT
         elif type == 0x000001:
@@ -169,13 +148,26 @@ class SubframeHeader(object):
             if masked > 4:
                 raise RuntimeError('Reserved subframe type {}'.format(hex(type)))
             self.predictor_order = masked
+            return SubframeType.SUBFRAME_FIXED
         elif 0x010000 <= type <= 0x011111:
             raise RuntimeError('Reserved subframe type {}'.format(hex(type)))
         elif 0x100000 <= type <= 0x111111:
             masked = type & 0x011111
             self.predictor_order = masked + 1
             return SubframeType.SUBFRAME_LPC
-        raise RuntimeError('Unknown subframe type {}'.format(hex(type)))
+        else:
+            raise RuntimeError('Unknown subframe type {}'.format(hex(type)))
+
+    def read_subframe_type(self):
+        type = c_uint8.from_buffer(bytearray(self.flac_file.read(1))).value
+        # interpret 'wasted bits per sample' flag
+        flag = type & 0x10000000
+        if flag != 0:
+            # From the standard:
+            # 1 : k wasted bits-per-sample in source subblock,
+            # k-1 follows, unary coded; e.g. k=3 => 001 follows, k=7 => 0000001 follows.
+            raise NotImplementedError()
+        return self.interpret_subframe_type(type)
 
     def dump(self):
         print('Subframe header:')
